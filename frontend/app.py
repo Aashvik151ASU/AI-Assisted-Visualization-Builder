@@ -16,6 +16,18 @@ import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 import streamlit as st
 
+# On Streamlit Cloud, secrets live in st.secrets — NOT os.environ.
+# backend/config.py uses pydantic-settings which reads os.environ, so we
+# copy secrets into os.environ before any backend module is imported.
+# (os.environ.setdefault won't overwrite values already set by a .env file
+# or the shell, so local dev is unaffected.)
+try:
+    for _k, _v in st.secrets.items():
+        if isinstance(_v, str):
+            os.environ.setdefault(_k.upper(), _v)
+except Exception:
+    pass  # no secrets.toml locally — .env is used instead
+
 from backend.ai_layer import VizSpec, generate_insight, interpret_prompt, suggest_with_specs
 from backend.chart_engine import convert_currency_cols, render_chart
 from backend.database import get_db, init_db

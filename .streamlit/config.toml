@@ -1,0 +1,7 @@
+[server]
+# Maximum size (MB) for a single uploaded file.
+# Streamlit Cloud cap is 200 MB; raise only if your plan allows it.
+maxUploadSize = 200
+
+[browser]
+gatherUsageStats = false

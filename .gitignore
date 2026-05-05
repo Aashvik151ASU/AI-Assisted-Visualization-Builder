@@ -10,6 +10,7 @@ build/
 # Environment
 .env
 .env.*
+.streamlit/secrets.toml
 
 # Generated chart outputs and uploaded files
 data/outputs/
