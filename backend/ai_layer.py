@@ -8,6 +8,13 @@ from typing import Any
 import anthropic
 
 from backend.config import settings
+from backend.guardrails import (
+    GuardrailViolation,
+    sanitize_insight,
+    sanitize_title,
+    validate_input,
+    validate_viz_spec_output,
+)
 
 MODEL = "claude-sonnet-4-6"
 
@@ -142,7 +149,12 @@ def interpret_prompt(prompt_text: str, schema_context: str) -> VizSpec:
     """
     Interpret a natural language chart request against a dataset schema.
     Uses a plain-text JSON response (no tool use) for maximum proxy compatibility.
+
+    Raises GuardrailViolation if the prompt fails input safety checks.
     """
+    # ── Input guardrail ────────────────────────────────────────────────────────
+    validate_input(prompt_text)
+
     client = _make_client()
 
     with client.messages.stream(
@@ -162,12 +174,16 @@ def interpret_prompt(prompt_text: str, schema_context: str) -> VizSpec:
         text = stream.get_final_text()
 
     raw = _parse_json_from_text(text)
+
+    # ── Output guardrail ───────────────────────────────────────────────────────
+    validate_viz_spec_output(raw)   # logs warnings; does not raise
+
     return VizSpec(
         chart_type=raw["chart_type"],
         x_axis=raw["x_axis"],
         y_axis=raw["y_axis"],
         aggregation=raw["aggregation"],
-        title=raw["title"],
+        title=sanitize_title(raw["title"]),
         interpreted_intent=raw["interpreted_intent"],
         filters=raw.get("filters") or {},
         grouping=raw.get("grouping"),
@@ -204,7 +220,11 @@ def generate_insight(spec: VizSpec, stats: dict[str, Any]) -> str:
         system=_INSIGHT_SYSTEM,
         messages=[{"role": "user", "content": context}],
     ) as stream:
-        return stream.get_final_text().strip()
+        raw_insight = stream.get_final_text().strip()
+
+    # ── Output guardrail ───────────────────────────────────────────────────────
+    safe_insight, _ = sanitize_insight(raw_insight)
+    return safe_insight
 
 
 # ── Auto-suggestions (text only) ──────────────────────────────────────────────

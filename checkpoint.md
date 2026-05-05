@@ -377,3 +377,72 @@ streamlit run frontend/app.py
 2. In the app dashboard → **Settings → Secrets**, paste the contents of `.streamlit/secrets.toml.example` with real values.
 3. Set **Main file path** to `frontend/app.py`.
 4. Deploy — no backend server subprocess needed.
+
+---
+
+## Checkpoint 17 — AI Layer Input & Output Guardrails
+**Status:** Complete
+
+### Problem
+The AI layer accepted raw user prompt strings with no validation before forwarding them to Claude. A malicious user could:
+- Attempt **prompt injection** to override the system prompt ("ignore previous instructions", "jailbreak", DAN mode, etc.)
+- Try to **extract secrets** by asking for the API key, database password, `.env` contents, or credentials
+- Use **social engineering** techniques such as role-play, fictional scenarios, or instruction markers (`[INST]`, `<system>`) to bypass AI safety guidelines
+- Submit **homoglyph / Unicode-obfuscated** variants of the above to defeat naive string matching
+
+### Fix: `backend/guardrails.py` (new file)
+
+A standalone guardrails module with two layers of protection:
+
+**Input guardrails — `validate_input(prompt)`**
+
+Runs four checks in priority order. Raises `GuardrailViolation` (a `ValueError` subclass carrying a `category` field) on the first failure:
+
+| Category | Patterns detected |
+|---|---|
+| `length` | Prompts longer than 2 000 characters |
+| `injection` | "ignore previous instructions", "forget directives", "disregard", "override system", "you are now", "new instructions", "jailbreak", "DAN mode", "do anything now", "no restrictions", "print/reveal system prompt", "what are your instructions" |
+| `secret_extraction` | "api key", "secret key", "access key", "Anthropic … key/token", "password", "passphrase", "credentials", "private key", "environment variables", `.env`, `ANTHROPIC_API_KEY`, "database password/url", "print/reveal … key/token/secret", "exfiltrate" |
+| `social_engineering` | "pretend you are", "act as if", "role-play", "for educational purposes … show/reveal", "hypothetically … what/tell", "in a fictional scenario", "without restrictions", "completely unrestricted", `<system>` tags, `[INST]`/`[/INST]` markers |
+
+All checks normalize text with **NFKC Unicode normalization** before pattern matching to defeat full-width character and homoglyph obfuscation.
+
+**Output guardrails**
+
+Applied to every Claude response before it reaches the user:
+
+- `sanitize_insight(text)` — strips control characters, redacts `sk-ant-*` Anthropic keys, OpenAI-style `sk-*` keys, base64 tokens with `=` padding, and database connection strings (Postgres, MySQL, MongoDB, Redis, SQLite); caps output at 1 500 characters.
+- `sanitize_title(title)` — NFKC-normalizes, strips control characters, caps at 200 characters.
+- `validate_viz_spec_output(raw)` — scans all text fields in the parsed VizSpec JSON (`title`, `interpreted_intent`, `x_axis`, `y_axis`, `alignment_issues`) for potential secrets; returns a list of warning strings without raising.
+
+### Integration: `backend/ai_layer.py`
+
+- `interpret_prompt()` — calls `validate_input(prompt_text)` **before** the Claude API call; applies `sanitize_title()` to the returned chart title and `validate_viz_spec_output()` to the full parsed JSON.
+- `generate_insight()` — passes the raw Claude response through `sanitize_insight()` before returning.
+
+### Integration: `backend/main.py`
+
+All three prompt-accepting endpoints validate user input **before any database writes**, returning HTTP 422 on a `GuardrailViolation`:
+
+- `POST /prompt` — `validate_input()` called before the `DBPromptRequest` row is created; `GuardrailViolation` also caught inside the render try-block and returned as 422 rather than 500.
+- `POST /interpret` — `validate_input()` called before session lookup.
+- `POST /render` — `validate_input()` called before session lookup.
+
+### Tests: `tests/test_guardrails.py` (new file)
+
+49 tests covering all guardrail surfaces:
+
+- Length limits (at-limit passes, over-limit blocked)
+- Injection pattern detection (12 attack variants)
+- Secret extraction detection (9 attack variants)
+- Social engineering detection (9 attack variants + fictional-scenario overlap case)
+- Unicode / homoglyph obfuscation (full-width chars, zero-width joiners)
+- Output insight sanitization (clean pass-through, control-char stripping, Anthropic key redaction, DB URL redaction, length truncation)
+- Title sanitization (normal pass-through, length cap, control-char stripping)
+- VizSpec output validation (clean spec, key-in-title flagged)
+
+### File changes
+- `backend/guardrails.py` — new; all guardrail logic
+- `backend/ai_layer.py` — imports and integrates `validate_input`, `sanitize_insight`, `sanitize_title`, `validate_viz_spec_output`
+- `backend/main.py` — imports `GuardrailViolation`, `validate_input`; adds boundary checks to `/prompt`, `/interpret`, `/render`
+- `tests/test_guardrails.py` — new; 49 passing tests

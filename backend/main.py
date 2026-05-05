@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from backend.ai_layer import VizSpec, generate_insight, interpret_prompt, suggest_with_specs
+from backend.guardrails import GuardrailViolation, validate_input
 from backend.chart_engine import convert_currency_cols, render_chart
 from backend.config import settings
 from backend.database import get_db, init_db
@@ -245,6 +246,11 @@ async def upload_file(
 @app.post("/interpret", response_model=InterpretResponse)
 def interpret_only(body: InterpretBody):
     """Return the AI's chart interpretation without rendering anything."""
+    try:
+        validate_input(body.prompt)
+    except GuardrailViolation as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
     session_data = session_store.get(body.session_id)
     if session_data is None:
         raise HTTPException(status_code=404, detail="Session not found or expired.")
@@ -254,6 +260,8 @@ def interpret_only(body: InterpretBody):
 
     try:
         spec = interpret_prompt(body.prompt, schema_context)
+    except GuardrailViolation as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -265,6 +273,12 @@ def interpret_only(body: InterpretBody):
 @app.post("/render", response_model=PromptResponse)
 def render_confirmed(body: RenderBody, db: Session = Depends(get_db)):
     """Render a chart from a user-confirmed VizSpec."""
+    # ── Input guardrail ────────────────────────────────────────────────────────
+    try:
+        validate_input(body.prompt)
+    except GuardrailViolation as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
     session_data = session_store.get(body.session_id)
     if session_data is None:
         raise HTTPException(status_code=404, detail="Session not found or expired.")
@@ -468,6 +482,12 @@ def submit_prompt(
     body: PromptBody,
     db: Session = Depends(get_db),
 ):
+    # ── Input guardrail (before any DB writes) ─────────────────────────────────
+    try:
+        validate_input(body.prompt)
+    except GuardrailViolation as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
     session_data = session_store.get(body.session_id)
     if session_data is None:
         raise HTTPException(status_code=404, detail="Session not found or expired.")
@@ -494,6 +514,10 @@ def submit_prompt(
         viz_spec: VizSpec = interpret_prompt(body.prompt, schema_context)
         chart_result = render_chart(df, viz_spec, backend="matplotlib")
         insight = generate_insight(viz_spec, chart_result.stats)
+    except GuardrailViolation as exc:
+        pr.status = "failed"
+        db.commit()
+        raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
         pr.status = "failed"
         db.commit()
