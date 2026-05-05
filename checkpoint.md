@@ -446,3 +446,57 @@ All three prompt-accepting endpoints validate user input **before any database w
 - `backend/ai_layer.py` — imports and integrates `validate_input`, `sanitize_insight`, `sanitize_title`, `validate_viz_spec_output`
 - `backend/main.py` — imports `GuardrailViolation`, `validate_input`; adds boundary checks to `/prompt`, `/interpret`, `/render`
 - `tests/test_guardrails.py` — new; 49 passing tests
+
+---
+
+## Checkpoint 18 — Supabase Scoped to Feedback Only
+**Status:** Complete
+
+### Problem
+The original data model had Supabase (via SQLAlchemy) recording seven entity types: User, Dataset, DataColumnMetadata, PromptRequest, VisualizationSpec, GeneratedOutput, and Feedback. After the in-process refactor (Checkpoint 15), the frontend bypassed all FastAPI endpoints and called backend functions directly — meaning none of the DB writes actually executed in the real app. The only DB write that was attempted was in `_submit_feedback`, but it depended on a User row and a GeneratedOutput FK that were never written, so it silently failed.
+
+### Fix: single standalone Feedback table
+
+Supabase is now used exclusively to collect star-rating feedback from users. All other DB models and writes have been removed.
+
+**`backend/models.py`** — Replaced all 7 ORM models with a single standalone `Feedback` table (no foreign keys to any other table):
+
+| Column | Type | Notes |
+|---|---|---|
+| `feedback_id` | UUID (PK) | Auto-generated |
+| `output_id` | UUID | Local chart identifier — no FK |
+| `session_id` | String | Session that produced the chart |
+| `rating` | Integer (1–5) | Star rating |
+| `comments` | Text | Optional free-text comment |
+| `revision_requested` | Boolean | Whether the user asked for a revision |
+| `chart_type` | String | bar / line / scatter / pie / histogram |
+| `chart_title` | String | Title of the rated chart |
+| `submitted_at` | Timestamp | Auto-set on insert |
+
+**`backend/main.py`** — Major cleanup:
+- Removed imports: `User`, `Dataset`, `DataColumnMetadata`, `PromptRequest`, `VisualizationSpec`, `GeneratedOutput`
+- Removed `_get_or_create_system_user` helper
+- Removed `db: Session = Depends(get_db)` from `/upload`, `/render`, `/suggest`, `/auto-preview`, `/prompt` — none of these endpoints write to the DB anymore
+- Removed `/chart/{output_id}` and `/export/{output_id}` endpoints (both depended on `GeneratedOutput`)
+- Simplified `/feedback` endpoint — writes directly to the standalone `Feedback` table; no FK lookups required
+- Added `session_id`, `chart_type`, `chart_title` to `FeedbackBody`
+- `output_id` in all render responses is now a locally generated `uuid.uuid4()`
+
+**`frontend/app.py`** — `_submit_feedback` rewritten:
+- Removed `User` query (no User table)
+- Reads `chart_type` and `chart_title` from `st.session_state.viz_spec` and writes them into the `Feedback` row
+- Remains a silent no-op when `DATABASE_URL` is not configured
+
+**`backend/config.py`** — Removed unused `supabase_url` and `supabase_anon_key` fields. Only `database_url` is needed (SQLAlchemy connects directly via the Postgres connection string).
+
+### Result
+- `init_db()` now creates exactly one table: `feedbacks`
+- Every star rating submitted in the UI is persisted to Supabase with chart context (type, title, session)
+- No other operations touch the database
+- Supabase remains fully optional — omit `DATABASE_URL` and feedback silently succeeds without persisting
+
+### File changes
+- `backend/models.py` — replaced 7 models with standalone `Feedback`
+- `backend/main.py` — stripped DB writes from all non-feedback endpoints; simplified `/feedback`; removed `/chart` and `/export`
+- `frontend/app.py` — fixed `_submit_feedback` to write chart context; removed `User` dependency
+- `backend/config.py` — removed `supabase_url`, `supabase_anon_key`

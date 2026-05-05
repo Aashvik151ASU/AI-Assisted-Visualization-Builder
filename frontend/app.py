@@ -202,24 +202,22 @@ def _render_confirmed(
 
 
 def _submit_feedback(output_id: str, rating: int, comments: str, revision: bool) -> bool:
-    # DB persistence is optional; silently succeed when not configured
+    # Silently succeed when DATABASE_URL is not configured
     try:
         db_gen = get_db()
         db = next(db_gen)
         if db is None:
             return True
-        from backend.models import Feedback, GeneratedOutput, User
-        system_user = db.query(User).filter(
-            User.email == "system@ai-viz-builder.internal"
-        ).first()
-        if system_user is None:
-            return True
+        from backend.models import Feedback
+        viz_spec: dict = st.session_state.get("viz_spec") or {}
         fb = Feedback(
             output_id=uuid.UUID(output_id),
-            user_id=system_user.user_id,
+            session_id=st.session_state.get("session_id"),
             rating=rating,
             comments=comments or None,
             revision_requested=revision,
+            chart_type=viz_spec.get("chart_type"),
+            chart_title=viz_spec.get("title"),
         )
         db.add(fb)
         db.commit()
