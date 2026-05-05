@@ -1,0 +1,21 @@
+department,region,headcount,attrition_rate,avg_tenure_years,open_roles
+Engineering,East,120,8.2,4.1,12
+Engineering,West,95,9.5,3.8,8
+Sales,East,80,22.4,2.3,15
+Sales,West,65,24.1,2.1,11
+Sales,South,50,20.8,2.5,9
+Marketing,East,55,14.6,3.2,5
+Marketing,West,40,13.0,3.5,4
+HR,East,30,10.5,4.8,2
+HR,West,20,11.0,4.5,2
+Finance,East,42,7.8,5.6,3
+Finance,West,30,8.5,5.1,2
+Operations,East,90,17.3,2.9,10
+Operations,West,75,16.0,3.0,8
+Operations,South,60,18.5,2.7,7
+Product,East,50,11.2,3.7,6
+Data Science,East,45,9.8,3.4,7
+Data Science,West,35,10.2,3.1,5
+Customer Support,East,100,28.6,1.8,20
+Customer Support,West,85,27.4,1.9,18
+Customer Support,South,70,29.1,1.7,15

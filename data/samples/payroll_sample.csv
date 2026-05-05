@@ -1,0 +1,11 @@
+department,employee_count,avg_salary,total_overtime_hours
+Engineering,85,102000,1240
+Sales,60,78000,980
+Marketing,40,85000,620
+HR,25,72000,310
+Finance,30,95000,440
+Operations,55,68000,1100
+Product,45,110000,530
+Legal,15,125000,180
+Customer Support,70,58000,1850
+Data Science,35,118000,670
