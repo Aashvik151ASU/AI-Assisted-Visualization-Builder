@@ -1,469 +1,527 @@
 # AI-Assisted Visualization Builder for Business Data
 
-## Capstone Title
+A Python-first AI visualization builder that transforms uploaded structured data and natural language prompts into validated charts, AI-generated insights, and downloadable outputs — powered by Claude and deployable to Streamlit Community Cloud with zero configuration.
 
-AI-Assisted Visualization Builder for Business Data
+---
 
-## Project Description / Scope
+## Table of Contents
 
-Build a web-based AI-assisted visualization builder that allows users to upload structured datasets, describe what they want in plain English, and automatically generate visualizations, chart recommendations, summary insights, and downloadable outputs. The system will use a Python-first stack for data ingestion, profiling, transformation, and chart generation, while Claude Code can support the development workflow for code generation, refactoring, prompt iteration, and rapid feature implementation.
+- [Project Description](#project-description)
+- [Live Demo](#live-demo)
+- [Features](#features)
+- [Architecture](#architecture)
+- [System Flow](#system-flow)
+- [Security & Guardrails](#security--guardrails)
+- [Data Model](#data-model)
+- [Tech Stack](#tech-stack)
+- [Getting Started](#getting-started)
+- [Project Structure](#project-structure)
+- [Supported File Formats](#supported-file-formats)
+- [API Reference](#api-reference)
+- [Data Quality Checks](#data-quality-checks)
+- [Success Metrics](#success-metrics)
+- [Stakeholder Value](#stakeholder-value)
+- [Future Enhancements](#future-enhancements)
 
-The application will accept user instructions such as:
-- “Show monthly payroll trend by department”
-- “Compare employee count across regions”
-- “Find anomalies in overtime hours”
+---
 
-The platform will translate those requests into chart logic and rendering steps.
+## Project Description
 
-### Core scope
-- Dataset upload
-- Schema detection
-- Metadata extraction
-- Prompt-to-chart generation
-- Chart customization
-- Data validation
-- User feedback loop
-- Export functionality
+This application lets users upload structured business datasets, describe what they want to see in plain English, and automatically receive validated charts, AI-generated insights, and exportable outputs. No SQL, Python, or BI tool expertise is required.
 
-### Optional advanced scope
-- Auto-generated narratives
-- Anomaly highlighting
-- Recommended follow-up charts
-- Reusable chart templates for repeated business reporting use cases
+Example prompts the system handles:
 
-### Key capabilities in scope
-- Upload CSV, Excel, and JSON files
-- Parse schema and profile columns automatically
-- Let users ask for charts in natural language
-- Recommend best-fit visualizations based on data type and intent
-- Generate charts using Python libraries
-- Render visual outputs in the website
-- Provide chart summaries and basic insights
-- Allow users to refine results interactively
-- Export visualizations as PNG, PDF, or shareable dashboard views
+- "Show monthly payroll trend by department"
+- "Compare employee count across regions as a bar chart"
+- "Plot the distribution of salaries as a histogram"
+- "Show total revenue by region, filtered to Q1 only"
 
-## Conceptual Data Model
+The platform translates those requests into chart logic, renders visualizations against the full dataset, and returns a plain-English insight summary — all within seconds.
 
-### Main entities
+---
 
-#### 1. User
-- `user_id`
-- `name`
-- `email`
-- `role`
+## Live Demo
 
-#### 2. Dataset
-- `dataset_id`
-- `user_id`
-- `file_name`
-- `source_type`
-- `upload_timestamp`
-- `row_count`
-- `column_count`
-- `schema_version`
+Deployed on Streamlit Community Cloud. Set `ANTHROPIC_API_KEY` in the app's Secrets dashboard and point the main file to `frontend/app.py`.
 
-#### 3. Data Column Metadata
-- `column_id`
-- `dataset_id`
-- `column_name`
-- `detected_data_type`
-- `null_percentage`
-- `unique_count`
-- `min_value`
-- `max_value`
-- `sample_values`
+---
 
-#### 4. Prompt Request
-- `request_id`
-- `user_id`
-- `dataset_id`
-- `prompt_text`
-- `request_timestamp`
-- `interpreted_intent`
-- `status`
+## Features
 
-#### 5. Visualization Spec
-- `viz_id`
-- `request_id`
-- `chart_type`
-- `x_axis`
-- `y_axis`
-- `aggregation`
-- `filters`
-- `grouping`
-- `title`
-- `color_encoding`
+### Two visualization paths
 
-#### 6. Generated Output
-- `output_id`
-- `viz_id`
-- `output_path`
-- `output_format`
-- `generated_timestamp`
-- `insight_summary`
+**AI Suggestions tab** — click once to receive up to 5 AI-generated chart ideas tailored to the uploaded dataset's schema. Each suggestion renders immediately against the full dataset.
 
-#### 7. Feedback
-- `feedback_id`
-- `output_id`
-- `user_id`
-- `rating`
-- `comments`
-- `revision_requested`
+**Build Your Own tab** — full manual control over every parameter:
+- Chart type (bar, line, scatter, pie, histogram)
+- X-axis and Y-axis column selectors
+- Aggregation function (sum, mean, count, max, min, none) with axis direction control
+- Group By column for multi-series charts
+- Up to 3 simultaneous column filters (categorical multiselect or free-text)
 
-## Conceptual Diagram
+### Data handling
+- Upload CSV, XLSX, JSON, and Parquet files (up to 100 MB)
+- Automatic schema profiling — detected types, null %, unique counts, min/max, sample values
+- Currency / amount column auto-detection and symbol stripping (`$€£¥₹₩₺₽`)
+- Raw data stored in RAM only — never written to disk or the database
+
+### AI layer
+- Natural language → structured chart spec via Claude (claude-sonnet-4-6)
+- Column alignment checking — flags missing columns and suggests closest matches
+- 2–3 sentence plain-English insight summary per chart
+- Input and output guardrails (see [Security & Guardrails](#security--guardrails))
+
+### Output
+- Matplotlib-rendered PNG charts with dynamic sizing and layout
+- AI insight panel below each chart
+- PNG and PDF export
+- Star-rating feedback form per output
+
+---
+
+## Architecture
+
+The frontend and backend run **in the same Python process** — no HTTP server is spawned and no network calls are made between the UI and the backend logic. This makes the app deployable to Streamlit Community Cloud without a separate server.
 
 ```text
-+------------------+
-|       User       |
-+------------------+
-| user_id          |
-| name             |
-| email            |
-| role             |
-+---------+--------+
-          |
-          | uploads / requests
-          v
-+------------------+
-|     Dataset      |
-+------------------+
-| dataset_id       |
-| user_id          |
-| file_name        |
-| source_type      |
-| upload_timestamp |
-| row_count        |
-| column_count     |
-| schema_version   |
-+---------+--------+
-          |
-          | has
-          v
-+------------------------+
-|  Data Column Metadata  |
-+------------------------+
-| column_id              |
-| dataset_id             |
-| column_name            |
-| detected_data_type     |
-| null_percentage        |
-| unique_count           |
-| min_value / max_value  |
-| sample_values          |
-+------------------------+
-
-          +---------------------------------------------+
-          |                                             |
-          | user asks in natural language               |
-          v                                             |
-+------------------+                                    |
-|  Prompt Request  |                                    |
-+------------------+                                    |
-| request_id       |                                    |
-| user_id          |                                    |
-| dataset_id       |                                    |
-| prompt_text      |                                    |
-| interpreted_intent                                   |
-| status           |                                    |
-+---------+--------+                                    |
-          |                                             |
-          | converted into                              |
-          v                                             |
-+------------------+                                    |
-| Visualization    |                                    |
-| Spec             |                                    |
-+------------------+                                    |
-| viz_id           |                                    |
-| request_id       |                                    |
-| chart_type       |                                    |
-| x_axis           |                                    |
-| y_axis           |                                    |
-| aggregation      |                                    |
-| filters          |                                    |
-| grouping         |                                    |
-| title            |                                    |
-+---------+--------+                                    |
-          |                                             |
-          | generates                                   |
-          v                                             |
-+------------------+                                    |
-| Generated Output |                                    |
-+------------------+                                    |
-| output_id        |                                    |
-| viz_id           |                                    |
-| output_path      |                                    |
-| output_format    |                                    |
-| insight_summary  |                                    |
-| generated_time   |                                    |
-+---------+--------+                                    |
-          |                                             |
-          | receives feedback                           |
-          v                                             |
-+------------------+                                    |
-|     Feedback     |------------------------------------+
-+------------------+
-| feedback_id      |
-| output_id        |
-| user_id          |
-| rating           |
-| comments         |
-| revision_request |
-+------------------+
++-------------------------------------------------------+
+|                  Streamlit Frontend                   |
+|   Upload UI | Prompt Box | Chart View | Export        |
++-----------------------------+-------------------------+
+                              | direct Python calls
+                              v
++-------------------------------------------------------+
+|                    Backend Modules                    |
+|                                                       |
+|  +-----------------+     +-------------------------+  |
+|  | ingestion.py    |     | guardrails.py           |  |
+|  | File parsing    |     | Input validation        |  |
+|  | Validation      |     | Output sanitization     |  |
+|  +-----------------+     +-------------------------+  |
+|           |                         |                 |
+|           v                         v                 |
+|  +-----------------+     +-------------------------+  |
+|  | profiler.py     |     | ai_layer.py             |  |
+|  | Schema metadata |---->| Claude API calls        |  |
+|  | LLM context     |     | interpret_prompt()      |  |
+|  +-----------------+     | generate_insight()      |  |
+|           |              | suggest_with_specs()    |  |
+|           v              +-------------------------+  |
+|  +-----------------+               |                  |
+|  | session_store   |               v                  |
+|  | In-memory store |     +-------------------------+  |
+|  | TTL-based evict |     | chart_engine.py         |  |
+|  +-----------------+     | Pandas transforms       |  |
+|           |              | Matplotlib rendering    |  |
+|           |              | PNG output              |  |
+|           v              +-------------------------+  |
+|  +-----------------+                                  |
+|  | database.py     |                                  |
+|  | SQLAlchemy ORM  |                                  |
+|  | Supabase/PG     |                                  |
+|  | (optional)      |                                  |
+|  +-----------------+                                  |
++-------------------------------------------------------+
 ```
 
-## System Flow Diagram
+---
+
+## System Flow
 
 ```text
 [User Uploads File]
         |
         v
-[File Intake Layer]
+[File Intake & Validation]
+  • Type / size check
+  • Schema validation
+  • Null / duplicate detection
         |
         v
-[Data Parsing and Validation]
+[Schema Profiling Engine]
+  • Type inference per column
+  • Null %, unique counts, min/max
+  • Sample values, all categories
         |
         v
-[Schema Detection + Profiling Engine]
-        |
-        v
-[Metadata Store]
+[In-Memory Session Store]  ←── raw DataFrame (RAM only, 30-min TTL)
         |
         +-------------------------------+
         |                               |
         v                               v
-[Natural Language Prompt]        [Dataset Context]
+[Natural Language Prompt]        [Schema Context (metadata only)]
+        |                               |
+        v                               |
+[Input Guardrails]                      |
+  • Length limit (2 000 chars)          |
+  • Prompt injection detection          |
+  • Secret extraction detection         |
+  • Social engineering detection        |
         |                               |
         +---------------+---------------+
                         |
                         v
-             [Prompt Interpretation Layer]
+             [Claude API — interpret_prompt()]
+               Schema + prompt → VizSpec JSON
                         |
                         v
-            [Visualization Recommendation]
+             [Output Guardrails]
+               Sanitize title / redact secrets
                         |
                         v
-         [Python Chart Generation Engine]
-          (Matplotlib / Plotly / Seaborn)
+          [Chart Generation Engine]
+            Filters → Aggregation → Render
+            Matplotlib PNG → data/outputs/
                         |
                         v
-               [Rendered Visualization]
+             [Claude API — generate_insight()]
+               VizSpec + stats → 2–3 sentence summary
                         |
                         v
-         [Insight Summary + User Feedback Loop]
+             [Output Guardrails]
+               Redact secrets from insight text
                         |
                         v
-              [Export / Save / Re-generate]
+        [Chart + Insight displayed in UI]
+                        |
+                        v
+         [Export PNG / PDF | Star-rating Feedback]
 ```
 
-## Tools, Data Sources, and Formats
+---
 
-### Frontend
-- Streamlit for faster Python-first web app development, or Flask/FastAPI with a lightweight frontend
-- HTML, CSS, JavaScript for UI enhancements
-- Optional React frontend if a richer interactive experience is needed
+## Security & Guardrails
 
-### Backend
-- Python
-- FastAPI or Flask for APIs
-- Pandas for data processing
-- NumPy for numerical handling
-- Pydantic for request validation
+All user prompts pass through `backend/guardrails.py` before reaching the Claude API. Every Claude response is sanitized before it reaches the user.
 
-### Visualization Layer
-- Matplotlib for chart rendering
-- Plotly as an optional enhancement for interactive charts
-- D3.js only if a custom front-end visualization layer is later required
+### Input guardrails — `validate_input(prompt)`
 
-### AI / LLM Layer
-- Claude API for natural language interpretation, chart recommendation, prompt understanding, and insight generation
-- Claude Code for development acceleration, code scaffolding, debugging assistance, and rapid iteration
+| Category | What is detected and blocked |
+|---|---|
+| **Length** | Prompts longer than 2 000 characters |
+| **Prompt injection** | "ignore previous instructions", "forget directives", "override system", "you are now", "jailbreak", "DAN mode", "do anything now", "no restrictions", attempts to read back the system prompt |
+| **Secret extraction** | Requests for API keys, passwords, credentials, `.env` contents, `ANTHROPIC_API_KEY`, database URLs, "exfiltrate" |
+| **Social engineering** | Role-play, "act as if", "hypothetically", "without restrictions", `<system>` tags, `[INST]` / `[/INST]` markers, fictional-scenario bypasses |
 
-### Data Handling / Storage
-- Local file storage or object storage for uploaded files
-- SQLite or PostgreSQL for metadata, prompt history, chart specs, and feedback
-- Redis optional for caching repeated prompts or dataset summaries
+All checks run on **NFKC-normalized** text to defeat homoglyph and full-width Unicode character obfuscation.
 
-### Data Sources
-- User-uploaded business datasets
-- Sample public datasets for demos such as payroll, sales, healthcare operations, finance, HR, and supply chain
+### Output guardrails
 
-### Supported Formats
-- CSV
-- XLSX
-- JSON
-- Parquet as an advanced extension
+| Function | What it does |
+|---|---|
+| `sanitize_insight()` | Strips control characters; redacts `sk-ant-*` Anthropic keys, `sk-*` keys, base64 tokens, and database connection strings; caps at 1 500 chars |
+| `sanitize_title()` | Strips control characters; caps at 200 chars |
+| `validate_viz_spec_output()` | Scans all text fields in the returned VizSpec for potential secrets |
 
-## Ingestion Strategy
+### API boundary
 
-The ingestion pipeline begins when a user uploads a file through the website. The backend validates file type, size, encoding, and structural integrity before loading it into a Pandas DataFrame. Once loaded, a profiling layer scans the dataset to detect schema, infer data types, estimate missing values, identify duplicates, and generate descriptive metadata. This metadata is stored separately so the prompt interpretation layer can understand the structure of the uploaded data before suggesting charts. If the user enters a prompt, the system combines prompt text with dataset metadata and sends both to the LLM to determine user intent, appropriate chart type, required columns, and aggregation logic. The backend then applies the transformation logic, prepares a clean filtered dataset, and passes it into the chart generation engine. The rendered chart and summary are returned to the UI, where the user can approve, refine, or request another version.
+`POST /prompt`, `POST /interpret`, and `POST /render` all call `validate_input()` before any database writes. Violations return **HTTP 422** with a user-safe message.
 
-### Suggested ingestion stages
-1. File upload and format validation
-2. Schema extraction and column profiling
-3. Data type standardization
-4. Null and duplicate assessment
-5. Metadata generation and storage
-6. Prompt + metadata interpretation
-7. Transformation and aggregation
-8. Chart rendering and feedback capture
+---
+
+## Data Model
+
+### Entities
+
+#### User
+| Field | Type |
+|---|---|
+| `user_id` | UUID (PK) |
+| `name` | string |
+| `email` | string |
+| `role` | string |
+
+#### Dataset
+| Field | Type |
+|---|---|
+| `dataset_id` | UUID (PK) |
+| `user_id` | UUID (FK) |
+| `file_name` | string |
+| `source_type` | string |
+| `upload_timestamp` | datetime |
+| `row_count` | int |
+| `column_count` | int |
+| `schema_version` | int |
+
+#### DataColumnMetadata
+| Field | Type |
+|---|---|
+| `column_id` | UUID (PK) |
+| `dataset_id` | UUID (FK) |
+| `column_name` | string |
+| `detected_data_type` | string |
+| `null_percentage` | float |
+| `unique_count` | int |
+| `min_value` / `max_value` | string |
+| `sample_values` | JSONB |
+
+#### PromptRequest
+| Field | Type |
+|---|---|
+| `request_id` | UUID (PK) |
+| `user_id` | UUID (FK) |
+| `dataset_id` | UUID (FK) |
+| `prompt_text` | string |
+| `request_timestamp` | datetime |
+| `interpreted_intent` | string |
+| `status` | string |
+
+#### VisualizationSpec
+| Field | Type |
+|---|---|
+| `viz_id` | UUID (PK) |
+| `request_id` | UUID (FK) |
+| `chart_type` | string |
+| `x_axis` | string |
+| `y_axis` | string |
+| `aggregation` | string |
+| `filters` | JSONB |
+| `grouping` | string |
+| `title` | string |
+| `color_encoding` | string |
+
+#### GeneratedOutput
+| Field | Type |
+|---|---|
+| `output_id` | UUID (PK) |
+| `viz_id` | UUID (FK) |
+| `output_path` | string |
+| `output_format` | string |
+| `generated_timestamp` | datetime |
+| `insight_summary` | string |
+
+#### Feedback
+| Field | Type |
+|---|---|
+| `feedback_id` | UUID (PK) |
+| `output_id` | UUID (FK) |
+| `user_id` | UUID (FK) |
+| `rating` | int (1–5) |
+| `comments` | string |
+| `revision_requested` | bool |
+
+### Entity Relationship
+
+```text
+User ──< Dataset ──< DataColumnMetadata
+           │
+           └──< PromptRequest ──< VisualizationSpec ──< GeneratedOutput ──< Feedback
+```
+
+> The database is **optional**. When `DATABASE_URL` is not set, all DB operations are silent no-ops. Session data (raw DataFrames) lives in RAM only and is never persisted.
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | Streamlit |
+| Backend | FastAPI (also callable in-process) |
+| AI / LLM | Anthropic Claude API (`claude-sonnet-4-6`) |
+| Data processing | Pandas, NumPy |
+| Chart rendering | Matplotlib |
+| Schema validation | Pydantic, pydantic-settings |
+| Database ORM | SQLAlchemy |
+| Database | Supabase (PostgreSQL) — optional |
+| File formats | CSV, XLSX, JSON, Parquet |
+| Testing | pytest |
+| Deployment | Streamlit Community Cloud |
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.12
+- An Anthropic API key
+
+### Local setup
+
+```bash
+# 1. Clone the repo
+git clone <repo-url>
+cd CapStone
+
+# 2. Create and activate a virtual environment
+python3.12 -m venv .venv
+source .venv/bin/activate      # Windows: .venv\Scripts\activate
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Configure environment
+cp .env.example .env
+# Edit .env and set ANTHROPIC_API_KEY=your-key-here
+# DATABASE_URL is optional — leave blank to skip persistence
+
+# 5. Run the app
+streamlit run frontend/app.py
+```
+
+The app opens at `http://localhost:8501`. No separate backend server needed.
+
+### Local setup with Streamlit secrets (alternative)
+
+```bash
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+# Edit secrets.toml and fill in ANTHROPIC_API_KEY
+streamlit run frontend/app.py
+```
+
+### Running tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/
+```
+
+### Streamlit Cloud deployment
+
+1. Push the repo to GitHub.
+2. Create a new app in the Streamlit Community Cloud dashboard.
+3. Set **Main file path** to `frontend/app.py`.
+4. Under **Settings → Secrets**, add:
+   ```toml
+   ANTHROPIC_API_KEY = "sk-ant-..."
+   DATABASE_URL = "postgresql://..."   # optional
+   ```
+5. Deploy — no backend subprocess required.
+
+---
+
+## Project Structure
+
+```text
+CapStone/
+├── backend/
+│   ├── ai_layer.py        # Claude API calls: interpret_prompt, generate_insight, suggest_with_specs
+│   ├── chart_engine.py    # Pandas transforms + Matplotlib rendering
+│   ├── config.py          # pydantic-settings configuration
+│   ├── database.py        # SQLAlchemy engine (lazy, optional)
+│   ├── guardrails.py      # Input validation + output sanitization
+│   ├── ingestion.py       # File parsing + validation
+│   ├── main.py            # FastAPI app + all endpoints
+│   ├── models.py          # SQLAlchemy ORM models
+│   ├── profiler.py        # Schema profiling engine
+│   └── session_store.py   # In-memory DataFrame store with TTL eviction
+├── frontend/
+│   └── app.py             # Streamlit UI (calls backend modules in-process)
+├── data/
+│   ├── outputs/           # Rendered chart PNGs
+│   └── samples/           # Demo datasets
+├── tests/
+│   ├── test_ai_layer.py
+│   ├── test_guardrails.py
+│   ├── test_ingestion.py
+│   └── test_profiler.py
+├── .streamlit/
+│   ├── config.toml
+│   └── secrets.toml.example
+├── .env.example
+├── .python-version        # Pins Python 3.12 for Streamlit Cloud
+├── requirements.txt
+├── requirements-dev.txt
+└── checkpoint.md
+```
+
+---
+
+## Supported File Formats
+
+| Format | Extension | Notes |
+|---|---|---|
+| CSV | `.csv` | UTF-8 and latin-1 encoding detection |
+| Excel | `.xlsx` | First sheet loaded by default |
+| JSON | `.json` | Records and columns orientation supported |
+| Parquet | `.parquet` | Full support |
+
+Maximum upload size: 100 MB (configurable via `MAX_UPLOAD_SIZE_MB`).
+
+---
+
+## API Reference
+
+All endpoints are defined in `backend/main.py` and also callable directly as Python functions from the frontend.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Liveness check |
+| `POST` | `/upload` | Upload a file; returns `session_id` and schema profile |
+| `POST` | `/prompt` | Natural language → chart + insight |
+| `POST` | `/interpret` | Natural language → VizSpec only (no render) |
+| `POST` | `/render` | Render from a confirmed VizSpec |
+| `POST` | `/suggest` | Return AI chart suggestions (no render) |
+| `POST` | `/auto-preview` | Return AI suggestions with rendered thumbnails |
+| `GET` | `/chart/{output_id}` | Retrieve a rendered chart PNG |
+| `POST` | `/feedback` | Submit a star rating and optional comment |
+
+All prompt-accepting endpoints enforce input guardrails and return **HTTP 422** on violations.
+
+---
 
 ## Data Quality Checks
 
-To make the platform reliable, the system should apply data quality rules before building charts. These checks prevent misleading visualizations and reduce chart generation failures.
+Applied automatically during ingestion (`backend/ingestion.py`):
 
-### Recommended checks
-- File validation: reject unsupported or corrupted files
-- Schema validation: confirm consistent headers and readable structure
-- Null checks: calculate missing value percentages per column
-- Duplicate checks: identify duplicate records or repeated headers
-- Data type validation: ensure numeric, categorical, and date fields are correctly inferred
-- Range validation: detect negative values in fields that should not be negative, such as salary or sales quantity
-- Date validation: confirm valid date formats and convert them into a standard format
-- Outlier detection: flag extreme values that may distort visualization
-- Aggregation readiness: verify that selected columns support the requested chart logic
-- Prompt-to-data alignment: confirm the fields requested by the user actually exist in the dataset
-- Visualization compatibility check: prevent unsupported combinations such as pie chart on high-cardinality dimensions or line chart without ordered data
+- **File validation** — reject unsupported types and files exceeding the size limit
+- **Schema validation** — confirm consistent headers and readable structure
+- **Null checks** — calculate missing value percentage per column
+- **Duplicate checks** — detect duplicate records
+- **Type inference** — coerce numeric, categorical, and datetime columns to consistent types
+- **Range validation** — flag unexpected negative values
+- **Date standardization** — detect and normalize mixed date formats
+- **Prompt-to-data alignment** — flag requested columns that don't exist; suggest closest matches
 
-### Example validation outcomes
-- “Department column has 12% missing values”
-- “Date column contains mixed formats”
-- “Requested metric ‘revenue’ not found; closest match is ‘total_revenue’”
-- “Scatter plot recommended instead of bar chart due to continuous variables”
+Example validation messages surfaced to the user:
+
+- "Department column has 12% missing values"
+- "Date column contains mixed formats — standardized to ISO 8601"
+- "Requested metric 'revenue' not found; closest match is 'total_revenue'"
+
+---
 
 ## Success Metrics
 
-### Technical metrics
+### Technical
 - Prompt-to-chart success rate
 - Chart generation response time
-- Data parsing accuracy
 - Schema detection accuracy
 - Failure rate for invalid prompt-to-column mapping
-- Percentage of prompts resolved without manual correction
+- Guardrail block rate (injection / secret extraction attempts)
 
-### User experience metrics
-- User satisfaction rating per generated output
-- Number of chart refinements per request
-- Time taken from upload to first usable chart
-- Percentage of accepted first-attempt visualizations
-- Repeat usage rate
+### User experience
+- Star rating per generated output (1–5)
+- Number of chart refinements per session
+- Time from upload to first chart
+- First-attempt acceptance rate
 
-### Business and product metrics
-- Reduction in manual chart-building effort
-- Faster insight generation for business users
-- Improved accessibility for non-technical users
-- Higher report generation efficiency
-
-### Sample target metrics
+### Targets
 - 85%+ first-pass chart generation success
-- Under 10 seconds average response for medium-sized datasets
-- 70%+ user acceptance within first two iterations
-- 50% reduction in time spent building basic business charts manually
+- Under 10 seconds average response for medium datasets
+- 70%+ user acceptance within two iterations
+
+---
 
 ## Stakeholder Value
 
-### Business users
-- Can create charts without needing SQL, Python, or BI tool expertise
-- Get faster answers from raw uploaded data
-- Reduce dependency on analysts for simple reporting needs
+**Business users** — create charts from plain-English descriptions without SQL or Python skills.
 
-### Data analysts
-- Save time on repetitive visualization requests
-- Can focus on deeper analysis instead of routine chart generation
-- Gain a reusable assistant for exploratory data analysis
+**Data analysts** — offload repetitive chart generation; focus on deeper analysis.
 
-### Managers and decision-makers
-- Get quicker access to understandable visuals and trend summaries
-- Improve reporting speed during operations, payroll review, finance analysis, and performance tracking
+**Managers** — faster access to visual summaries during payroll review, operations tracking, and finance reporting.
 
-### Engineering teams
-- Build a reusable AI-powered analytics product pattern
-- Demonstrate practical integration of LLMs with structured data systems
-- Create a foundation for future features such as dashboards, auto-insights, anomaly detection, and conversational analytics
+**Engineering teams** — reference implementation of LLM + structured data integration with production-grade guardrails and cloud deployment.
 
-### Example stakeholder use cases
-- HR manager uploads payroll data and asks for overtime trend by department
-- Operations lead uploads staffing data and requests attrition distribution by region
-- Finance analyst uploads expense data and asks for monthly variance chart with anomaly highlighting
-
-## Proposed Architecture
-
-```text
-+------------------------------------------------------+
-|                    Web Application                   |
-|     Upload UI | Prompt Box | Chart View | Export     |
-+-----------------------------+------------------------+
-                              |
-                              v
-+------------------------------------------------------+
-|                    API Layer                         |
-|         FastAPI / Flask request handling             |
-+-----------------------------+------------------------+
-                              |
-             +----------------+----------------+
-             |                                 |
-             v                                 v
-+---------------------------+       +---------------------------+
-|    File Ingestion Layer   |       |   Prompt Interpretation  |
-| CSV/XLSX/JSON parser      |       | Claude API               |
-| Pandas loading            |       | intent extraction        |
-| validation rules          |       | chart recommendation     |
-+-------------+-------------+       +-------------+-------------+
-              |                                       |
-              v                                       |
-+---------------------------+                         |
-| Schema Profiling Engine   |-------------------------+
-| datatype inference        |
-| null checks               |
-| duplicates                |
-| statistics                |
-+-------------+-------------+
-              |
-              v
-+---------------------------+
-| Metadata / App Database   |
-| dataset metadata          |
-| prompt history            |
-| visualization specs       |
-| feedback                  |
-+-------------+-------------+
-              |
-              v
-+---------------------------+
-| Chart Generation Engine   |
-| Pandas transformations    |
-| Matplotlib / Plotly       |
-+-------------+-------------+
-              |
-              v
-+---------------------------+
-| Output Renderer           |
-| image/chart display       |
-| summary generation        |
-| export PNG/PDF            |
-+---------------------------+
-```
-
-## Deliverables
-
-- Working web application
-- Upload and data profiling module
-- Natural language to chart generation workflow
-- Visualization rendering engine
-- Data validation layer
-- Metadata tracking database
-- Feedback loop for chart refinement
-- Final presentation with architecture, demo, and evaluation metrics
+---
 
 ## Future Enhancements
 
-- Dashboard generation from multiple prompts
-- Auto-insight narration for each chart
+- Dashboard generation from multiple prompts in a single session
 - Role-based access for team collaboration
+- Database connector support (query instead of file upload)
 - Template memory for repeated reporting patterns
-- Anomaly detection and forecasting
-- Support for database connectors instead of only file uploads
-- Chat-based analytics assistant over uploaded data
-
-## One-line project summary
-
-A Python-first AI visualization builder that transforms uploaded structured data and natural language prompts into validated charts, insights, and reusable analytics outputs through an intelligent web application.
+- Anomaly detection and forecasting overlays
+- Conversational follow-up prompts within a session
+- Scheduled report generation
