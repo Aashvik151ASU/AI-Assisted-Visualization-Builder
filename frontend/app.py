@@ -7,8 +7,15 @@ from __future__ import annotations
 
 import io
 import os
+import sys
 import uuid
+from pathlib import Path
 from typing import Any
+
+# Streamlit Cloud executes frontend/app.py from the frontend/ subdirectory,
+# so the project root (which contains the backend/ package) is not on sys.path.
+# Insert it here so all 'from backend.*' imports resolve correctly.
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import matplotlib
 matplotlib.use("Agg")
