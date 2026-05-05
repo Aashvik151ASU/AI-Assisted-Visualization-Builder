@@ -5,12 +5,51 @@ AI suggests charts from schema/sample data; all rendering uses the full uploaded
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
+import time
+from pathlib import Path
 from typing import Any
 
 import requests
 import streamlit as st
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+
+
+@st.cache_resource(show_spinner="Starting backend server…")
+def _ensure_backend() -> str:
+    """Ping the backend; start it as a subprocess if it is not already running.
+
+    Using @st.cache_resource means this executes at most once per Streamlit
+    process lifetime — not on every page rerun. Works for both local runs
+    (where the backend may already be up) and Streamlit Community Cloud
+    (where nothing else is running).
+    """
+    try:
+        r = requests.get(f"{BACKEND_URL}/health", timeout=3)
+        if r.ok:
+            return "already_running"
+    except Exception:
+        pass
+
+    repo_root = str(Path(__file__).parent.parent)
+    subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "backend.main:app",
+         "--host", "127.0.0.1", "--port", "8000"],
+        cwd=repo_root,
+    )
+
+    for _ in range(30):
+        time.sleep(1)
+        try:
+            r = requests.get(f"{BACKEND_URL}/health", timeout=1)
+            if r.ok:
+                return "started"
+        except Exception:
+            pass
+
+    return "unavailable"
 
 st.set_page_config(
     page_title="AI Visualization Builder",
@@ -46,6 +85,7 @@ def _init_state() -> None:
 
 
 _init_state()
+_ensure_backend()
 
 
 # ── Currency detection ─────────────────────────────────────────────────────────
