@@ -251,3 +251,38 @@ Previously the **Build Your Own** filter multiselect only showed the top 5 categ
 - `to_dict()` includes `all_categories` so it flows through the `/upload` response to the frontend.
 - `_profile_column` now computes `all_cats = sorted(str_series.unique().tolist())[:500]` alongside the existing `top_categories` (kept at top 5 for the schema panel and LLM context).
 - `app.py` builds `col_categories` from `all_categories` first, falling back to `top_categories` keys for any profiles that pre-date this change. The filter multiselect now shows every unique value in the column.
+
+---
+
+## Checkpoint 14 — Streamlit Cloud Deployment & Backend Auto-Start
+**Status:** Complete
+
+### Problem
+Streamlit Community Cloud only hosts the Streamlit frontend process — no separate FastAPI server is running. All `requests` calls to `BACKEND_URL` would fail immediately on Cloud while continuing to work fine locally (where the backend is started manually).
+
+### Fix: dependency resolution (`requirements.txt`, `.python-version`)
+Two issues blocked the initial Cloud deployment:
+- `supabase==2.10.0` requires `httpx>=0.26,<0.28` but the file pinned `httpx==0.28.1` — resolved by downgrading to `httpx==0.27.2`.
+- Streamlit Cloud defaulted to Python 3.14, which has no pre-built wheels for several pinned packages (`pandas`, `psycopg2-binary`, `kaleido`), causing source-builds that timed out. Fixed by adding `.python-version` containing `3.12`.
+
+### Fix: backend auto-start (`frontend/app.py`)
+Added `_ensure_backend()`, decorated with `@st.cache_resource`, that runs exactly once per Streamlit process lifetime:
+1. Pings `GET /health` on `BACKEND_URL` (default `http://localhost:8000`) with a 3-second timeout.
+2. If the backend responds, returns immediately (`"already_running"`).
+3. If not, spawns `uvicorn backend.main:app --host 127.0.0.1 --port 8000` as a subprocess via `subprocess.Popen`, using `sys.executable` to ensure the same venv Python is used and `Path(__file__).parent.parent` as the working directory (repo root).
+4. Polls `/health` every second for up to 30 seconds, returning `"started"` once the server responds.
+5. A `show_spinner="Starting backend server…"` message is displayed in the UI during the wait.
+
+`_ensure_backend()` is called immediately after `_init_state()` at app startup, before any user-facing UI is rendered.
+
+### Behaviour by environment
+| Environment | Backend already running | Result |
+|---|---|---|
+| Local dev (backend started separately) | Yes | Health check passes, no-op |
+| Local dev (no backend started) | No | Auto-started, ready within ~5 s |
+| Streamlit Community Cloud | No | Auto-started on first load, cached for all subsequent reruns |
+
+### File changes
+- `requirements.txt` — `httpx==0.28.1` → `httpx==0.27.2`
+- `.python-version` — new file, pins deployment to Python `3.12`
+- `frontend/app.py` — added `subprocess`, `sys`, `time`, `Path` imports; added `_ensure_backend()` with `@st.cache_resource`; called at startup
