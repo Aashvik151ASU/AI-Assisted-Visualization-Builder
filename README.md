@@ -1,6 +1,6 @@
 # AI-Assisted Visualization Builder for Business Data
 
-A Python-first AI visualization builder that transforms uploaded structured data and natural language prompts into validated charts, AI-generated insights, and downloadable outputs — powered by Claude and deployable to Streamlit Community Cloud with zero configuration.
+A Python-first AI visualization builder that transforms uploaded structured business datasets into validated charts and AI-generated insights — powered by Claude and deployable to Streamlit Community Cloud with zero configuration.
 
 ---
 
@@ -27,16 +27,16 @@ A Python-first AI visualization builder that transforms uploaded structured data
 
 ## Project Description
 
-This application lets users upload structured business datasets, describe what they want to see in plain English, and automatically receive validated charts, AI-generated insights, and exportable outputs. No SQL, Python, or BI tool expertise is required.
+This application lets users upload structured business datasets and immediately receive AI-generated chart suggestions tailored to the data's schema — or manually configure every chart parameter themselves. No SQL, Python, or BI tool expertise is required.
 
-Example prompts the system handles:
+The AI analyzes the uploaded dataset's column names, types, and statistics, then automatically proposes up to five meaningful visualizations such as:
 
-- "Show monthly payroll trend by department"
-- "Compare employee count across regions as a bar chart"
-- "Plot the distribution of salaries as a histogram"
-- "Show total revenue by region, filtered to Q1 only"
+- Revenue totals grouped by region (bar chart)
+- Salary distribution across the workforce (histogram)
+- Headcount trends over time (line chart)
+- Overtime breakdown by department (grouped bar)
 
-The platform translates those requests into chart logic, renders visualizations against the full dataset, and returns a plain-English insight summary — all within seconds.
+Each suggestion is a fully specified chart rendered instantly against the full dataset and accompanied by a 2–3 sentence plain-English insight summary.
 
 ---
 
@@ -66,10 +66,10 @@ Deployed on Streamlit Community Cloud. Set `ANTHROPIC_API_KEY` in the app's Secr
 - Raw data stored in RAM only — never written to disk or the database
 
 ### AI layer
-- Natural language → structured chart spec via Claude (claude-sonnet-4-6)
-- Column alignment checking — flags missing columns and suggests closest matches
-- 2–3 sentence plain-English insight summary per chart
-- Input and output guardrails (see [Security & Guardrails](#security--guardrails))
+- Schema-driven chart suggestions — Claude reads column metadata and proposes up to 5 chart specs (`suggest_with_specs`)
+- Each suggestion includes chart type, axes, aggregation, and a plain-English description
+- 2–3 sentence insight summary generated per rendered chart (`generate_insight`)
+- Input and output guardrails on all API endpoints (see [Security & Guardrails](#security--guardrails))
 
 ### Output
 - Matplotlib-rendered PNG charts with dynamic sizing and layout
@@ -86,7 +86,7 @@ The frontend and backend run **in the same Python process** — no HTTP server i
 ```text
 +-------------------------------------------------------+
 |                  Streamlit Frontend                   |
-|   Upload UI | Prompt Box | Chart View | Export        |
+|   Upload UI | AI Suggestions | Chart View | Export     |
 +-----------------------------+-------------------------+
                               | direct Python calls
                               v
@@ -146,59 +146,64 @@ The frontend and backend run **in the same Python process** — no HTTP server i
         v
 [In-Memory Session Store]  ←── raw DataFrame (RAM only, 30-min TTL)
         |
-        +-------------------------------+
-        |                               |
-        v                               v
-[Natural Language Prompt]        [Schema Context (metadata only)]
-        |                               |
-        v                               |
-[Input Guardrails]                      |
-  • Length limit (2 000 chars)          |
-  • Prompt injection detection          |
-  • Secret extraction detection         |
-  • Social engineering detection        |
-        |                               |
-        +---------------+---------------+
-                        |
-                        v
-             [Claude API — interpret_prompt()]
-               Schema + prompt → VizSpec JSON
-                        |
-                        v
-             [Output Guardrails]
-               Sanitize title / redact secrets
-                        |
-                        v
-          [Chart Generation Engine]
-            Filters → Aggregation → Render
-            Matplotlib PNG → data/outputs/
-                        |
-                        v
-             [Claude API — generate_insight()]
-               VizSpec + stats → 2–3 sentence summary
-                        |
-                        v
-             [Output Guardrails]
-               Redact secrets from insight text
-                        |
-                        v
-        [Chart + Insight displayed in UI]
-                        |
-                        v
-         [Export PNG / PDF | Star-rating Feedback]
+        +-----------------------------------------------+
+        |                                               |
+        v                                               v
+  [PATH A — AI Suggestions]                  [PATH B — Build Your Own]
+  User clicks "Get AI Suggestions"           User picks chart type, axes,
+                                             aggregation, filters manually
+        |
+        v
+  [Guardrails — Input]
+   Applied to all API calls
+        |
+        v
+  [Claude API — suggest_with_specs()]
+   Schema metadata → 5 chart specs
+   (chart type, axes, aggregation, title)
+        |
+        v
+  [Suggestion cards displayed in UI]
+  User clicks "Use This Chart"
+        |                                               |
+        +-------------------+---------------------------+
+                            |
+                            v
+               [Guardrails — Input validation]
+                Applied at API boundary
+                            |
+                            v
+              [Chart Generation Engine]
+               Filters → Aggregation → Render
+               Matplotlib PNG → data/outputs/
+                            |
+                            v
+              [Claude API — generate_insight()]
+               VizSpec + computed stats →
+               2–3 sentence plain-English summary
+                            |
+                            v
+              [Guardrails — Output sanitization]
+               Redact secrets / strip control chars
+                            |
+                            v
+           [Chart + Insight displayed in UI]
+                            |
+                            v
+            [Export PNG / PDF | Star-rating Feedback]
 ```
 
 ---
 
 ## Security & Guardrails
 
-All user prompts pass through `backend/guardrails.py` before reaching the Claude API. Every Claude response is sanitized before it reaches the user.
+All text fields accepted by the API endpoints pass through `backend/guardrails.py` before reaching the Claude API. Every Claude response is sanitized before it reaches the user. This protects against malicious API-level attacks even though the standard UI does not expose a free-text prompt box.
 
-### Input guardrails — `validate_input(prompt)`
+### Input guardrails — `validate_input(text)`
 
 | Category | What is detected and blocked |
 |---|---|
-| **Length** | Prompts longer than 2 000 characters |
+| **Length** | Input longer than 2 000 characters |
 | **Prompt injection** | "ignore previous instructions", "forget directives", "override system", "you are now", "jailbreak", "DAN mode", "do anything now", "no restrictions", attempts to read back the system prompt |
 | **Secret extraction** | Requests for API keys, passwords, credentials, `.env` contents, `ANTHROPIC_API_KEY`, database URLs, "exfiltrate" |
 | **Social engineering** | Role-play, "act as if", "hypothetically", "without restrictions", `<system>` tags, `[INST]` / `[/INST]` markers, fictional-scenario bypasses |
