@@ -286,3 +286,94 @@ Added `_ensure_backend()`, decorated with `@st.cache_resource`, that runs exactl
 - `requirements.txt` — `httpx==0.28.1` → `httpx==0.27.2`
 - `.python-version` — new file, pins deployment to Python `3.12`
 - `frontend/app.py` — added `subprocess`, `sys`, `time`, `Path` imports; added `_ensure_backend()` with `@st.cache_resource`; called at startup
+
+---
+
+## Checkpoint 15 — In-Process Backend (No HTTP Server Required)
+**Status:** Complete
+
+### Problem
+The Streamlit Cloud auto-start approach in Checkpoint 14 still relied on spawning a FastAPI subprocess and making HTTP calls to `localhost:8000`. On Streamlit Community Cloud this caused `Connection refused` errors on `/upload` and all other endpoints because the subprocess failed to bind reliably, and the export section still used the old `requests.get` pattern.
+
+### Fix: direct in-process backend calls (`frontend/app.py`)
+Removed the entire HTTP layer. All backend logic is now invoked directly as Python function calls:
+
+- `_upload_file` — calls `ingest_upload()` and `profile_dataframe()` directly; stores the resulting DataFrame and metadata in `session_store` and returns a plain dict.
+- `_call_suggest` — retrieves session data from `session_store` and calls `suggest_with_specs()` directly.
+- `_render_confirmed` — retrieves the DataFrame from `session_store`, applies `convert_currency_cols`, constructs a `VizSpec`, calls `render_chart()` and `generate_insight()` directly, reads the PNG bytes from disk, and returns everything as a dict.
+- `_submit_feedback` — calls the SQLAlchemy session directly (no-op when `DATABASE_URL` is unset).
+- `_get_pdf_bytes` — new helper that converts PNG bytes to PDF in-memory using Matplotlib (replaces the old `GET /export/{id}` call).
+- Export buttons now use `st.session_state.chart_bytes` directly for PNG and `_get_pdf_bytes()` for PDF, removing the last two `requests.get` calls that were missed in an earlier refactor.
+- Removed `subprocess`, `time`, `requests` imports and the `BACKEND_URL` constant; removed `_ensure_backend()` and its call site.
+
+### Fix: optional database (`backend/config.py`, `backend/database.py`)
+`database_url` had no default, causing `pydantic-settings` to raise a `ValidationError` at startup when `DATABASE_URL` was not set. Fixed by:
+- `config.py` — `database_url: str = ""` (empty string default).
+- `database.py` — replaced module-level `create_engine()` call (which ran unconditionally at import time) with lazy `_get_engine()` / `_get_session_factory()` helpers that only create the engine when `database_url` is non-empty. `get_db()`, `init_db()`, and `check_connection()` all become safe no-ops when no database is configured.
+
+### File changes
+- `frontend/app.py` — removed HTTP-based helpers; added direct backend call helpers; added `_get_pdf_bytes()`; fixed export section; removed `_ensure_backend()`
+- `backend/config.py` — `database_url` made optional (empty default)
+- `backend/database.py` — lazy engine initialisation; all operations no-op without `DATABASE_URL`
+
+---
+
+## Checkpoint 16 — Streamlit Cloud Hosting Configuration
+**Status:** Complete
+
+### Problems resolved
+Three separate issues prevented a clean Streamlit Cloud deployment after the in-process refactor:
+
+1. **`ModuleNotFoundError: No module named 'backend'`** — Streamlit Cloud sets the working directory to the folder containing the main file (`frontend/`), so the `backend/` package one level up was not on `sys.path`.
+2. **Secrets not visible to `pydantic-settings`** — Streamlit Cloud stores secrets in `st.secrets`; it does NOT automatically inject them into `os.environ`. `pydantic-settings` reads `os.environ`, so `ANTHROPIC_API_KEY` was never found and `Settings()` raised a `ValidationError`.
+3. **Broken `requirements.txt`** — `kaleido==0.2.1` has no Python 3.12 pre-built wheel and would fail to install; `supabase==2.10.0` is not imported anywhere in the codebase; `pytest-asyncio==1.3.0` does not exist on PyPI; `pytest` and `pytest-asyncio` are dev-only and do not belong in the production requirements.
+
+### Fix 1: `sys.path` (`frontend/app.py`)
+Added at the very top of `app.py`, before any backend imports:
+```python
+sys.path.insert(0, str(Path(__file__).parent.parent))
+```
+`Path(__file__).parent.parent` resolves to the repo root regardless of the working directory, making `backend.*` importable on Cloud and in any local setup where the script is run from a non-root directory.
+
+### Fix 2: Streamlit secrets bridge (`frontend/app.py`)
+Added between `import streamlit as st` and the first `from backend.*` import (order matters — `backend/config.py` runs `Settings()` at import time):
+```python
+try:
+    for _k, _v in st.secrets.items():
+        if isinstance(_v, str):
+            os.environ.setdefault(_k.upper(), _v)
+except Exception:
+    pass  # no secrets.toml locally — .env is used instead
+```
+`os.environ.setdefault` ensures locally-set env vars and `.env` values are never overwritten.
+
+### Fix 3: `requirements.txt` cleanup
+- Removed `kaleido==0.2.1` — not used (app renders with Matplotlib, never calls `plotly_fig.write_image()`); no Python 3.12 wheel available.
+- Removed `supabase==2.10.0` — package is not imported anywhere; SQLAlchemy + psycopg2 connect to Supabase directly.
+- Removed `pytest==8.3.4` and `pytest-asyncio==1.3.0` — dev-only; `pytest-asyncio 1.3.0` does not exist on PyPI and would abort the Cloud install.
+- Created `requirements-dev.txt` with `-r requirements.txt` plus `pytest==8.3.4` and `pytest-asyncio==0.23.8` (valid version).
+
+### New files
+- `.streamlit/config.toml` — sets `maxUploadSize = 200` and disables anonymous usage stats.
+- `.streamlit/secrets.toml.example` — committed template listing every required and optional secret, with instructions for both local Streamlit dev (copy to `secrets.toml`) and the Streamlit Cloud dashboard.
+- `requirements-dev.txt` — dev/test dependencies separated from the production install.
+
+### `.gitignore` update
+Added `.streamlit/secrets.toml` to prevent accidental commit of real API keys.
+
+### Local development (summary)
+```bash
+# Option A — .env file (existing)
+cp .env.example .env          # fill in ANTHROPIC_API_KEY
+streamlit run frontend/app.py
+
+# Option B — Streamlit secrets
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml   # fill in keys
+streamlit run frontend/app.py
+```
+
+### Streamlit Cloud deployment (summary)
+1. Push to GitHub.
+2. In the app dashboard → **Settings → Secrets**, paste the contents of `.streamlit/secrets.toml.example` with real values.
+3. Set **Main file path** to `frontend/app.py`.
+4. Deploy — no backend server subprocess needed.
