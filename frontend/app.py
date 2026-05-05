@@ -1,55 +1,32 @@
 """
 Streamlit frontend — AI-Assisted Visualization Builder
 AI suggests charts from schema/sample data; all rendering uses the full uploaded dataset.
+Backend functions are called directly (in-process) — no separate server required.
 """
 from __future__ import annotations
 
+import io
 import os
-import subprocess
-import sys
-import time
-from pathlib import Path
+import uuid
 from typing import Any
 
-import requests
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.image as mpimg
+import matplotlib.pyplot as plt
 import streamlit as st
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+from backend.ai_layer import VizSpec, generate_insight, interpret_prompt, suggest_with_specs
+from backend.chart_engine import convert_currency_cols, render_chart
+from backend.database import get_db, init_db
+from backend.ingestion import ingest_upload
+from backend.profiler import profile_dataframe
+from backend.session_store import session_store as _session_store
 
-
-@st.cache_resource(show_spinner="Starting backend server…")
-def _ensure_backend() -> str:
-    """Ping the backend; start it as a subprocess if it is not already running.
-
-    Using @st.cache_resource means this executes at most once per Streamlit
-    process lifetime — not on every page rerun. Works for both local runs
-    (where the backend may already be up) and Streamlit Community Cloud
-    (where nothing else is running).
-    """
-    try:
-        r = requests.get(f"{BACKEND_URL}/health", timeout=3)
-        if r.ok:
-            return "already_running"
-    except Exception:
-        pass
-
-    repo_root = str(Path(__file__).parent.parent)
-    subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "backend.main:app",
-         "--host", "127.0.0.1", "--port", "8000"],
-        cwd=repo_root,
-    )
-
-    for _ in range(30):
-        time.sleep(1)
-        try:
-            r = requests.get(f"{BACKEND_URL}/health", timeout=1)
-            if r.ok:
-                return "started"
-        except Exception:
-            pass
-
-    return "unavailable"
+try:
+    init_db()
+except Exception:
+    pass
 
 st.set_page_config(
     page_title="AI Visualization Builder",
@@ -85,7 +62,6 @@ def _init_state() -> None:
 
 
 _init_state()
-_ensure_backend()
 
 
 # ── Currency detection ─────────────────────────────────────────────────────────
@@ -102,40 +78,61 @@ def _detect_currency_cols(schema_profile: dict) -> list[str]:
     return detected
 
 
-# ── Helpers: API calls ─────────────────────────────────────────────────────────
+# ── Helpers: direct backend calls ─────────────────────────────────────────────
 
 def _upload_file(file_obj) -> dict[str, Any] | None:
     try:
-        resp = requests.post(
-            f"{BACKEND_URL}/upload",
-            files={"file": (file_obj.name, file_obj.getvalue(), file_obj.type)},
-            timeout=60,
-        )
-        resp.raise_for_status()
-        return resp.json()
-    except requests.HTTPError as exc:
-        detail = exc.response.json().get("detail", str(exc)) if exc.response is not None else str(exc)
-        st.error(f"Upload failed: {detail}")
-    except requests.RequestException as exc:
-        st.error(f"Could not reach backend: {exc}")
-    return None
+        df, report = ingest_upload(file_obj.name, file_obj.getvalue())
+    except ValueError as exc:
+        st.error(f"Upload failed: {exc}")
+        return None
+    except Exception as exc:
+        st.error(f"Upload error: {exc}")
+        return None
+
+    profile = profile_dataframe(df)
+    metadata = {
+        "validation_report": report.to_dict(),
+        "schema_profile":    profile.to_dict(),
+        "schema_context":    profile.to_llm_context(),
+    }
+    session_id = _session_store.create(df, metadata)
+    return {
+        "session_id":        session_id,
+        "dataset_id":        "local",
+        "file_name":         file_obj.name,
+        "row_count":         report.row_count,
+        "column_count":      report.column_count,
+        "validation_report": report.to_dict(),
+        "schema_profile":    profile.to_dict(),
+    }
 
 
 def _call_suggest(session_id: str) -> list[dict] | None:
+    data = _session_store.get(session_id)
+    if data is None:
+        st.error("Session expired — please re-upload your file.")
+        return None
+    _, metadata = data
     try:
-        resp = requests.post(
-            f"{BACKEND_URL}/suggest",
-            json={"session_id": session_id},
-            timeout=60,
-        )
-        resp.raise_for_status()
-        return resp.json().get("suggestions", [])
-    except requests.HTTPError as exc:
-        detail = exc.response.json().get("detail", str(exc)) if exc.response is not None else str(exc)
-        st.error(f"Suggestions failed: {detail}")
-    except requests.RequestException as exc:
-        st.error(f"Could not reach backend: {exc}")
-    return None
+        pairs = suggest_with_specs(metadata.get("schema_context", ""))
+        return [
+            {
+                "title":        spec.title,
+                "suggestion":   text,
+                "chart_type":   spec.chart_type,
+                "x_axis":       spec.x_axis,
+                "y_axis":       spec.y_axis,
+                "aggregation":  spec.aggregation,
+                "filters":      spec.filters or {},
+                "grouping":     spec.grouping,
+                "color_encoding": spec.color_encoding,
+            }
+            for spec, text in pairs
+        ]
+    except Exception as exc:
+        st.error(f"Suggestions failed: {exc}")
+        return None
 
 
 def _render_confirmed(
@@ -144,89 +141,95 @@ def _render_confirmed(
     spec: dict[str, Any],
     currency_cols: list[str] | None = None,
 ) -> dict[str, Any] | None:
-    payload = {
-        "session_id": session_id,
-        "prompt": prompt,
-        "chart_type": spec["chart_type"],
-        "x_axis": spec["x_axis"],
-        "y_axis": spec["y_axis"],
-        "aggregation": spec["aggregation"],
-        "agg_axis": spec.get("agg_axis", "y"),
-        "title": spec.get("title", ""),
-        "filters": spec.get("filters") or {},
-        "grouping": spec.get("grouping"),
-        "color_encoding": spec.get("color_encoding"),
-        "interpreted_intent": spec.get("interpreted_intent", ""),
-        "currency_cols": currency_cols or [],
-    }
-    try:
-        resp = requests.post(f"{BACKEND_URL}/render", json=payload, timeout=120)
-        resp.raise_for_status()
-        return resp.json()
-    except requests.HTTPError as exc:
-        detail = exc.response.json().get("detail", str(exc)) if exc.response is not None else str(exc)
-        st.error(f"Chart rendering failed: {detail}")
-    except requests.RequestException as exc:
-        st.error(f"Could not reach backend: {exc}")
-    return None
-
-
-def _interpret_prompt(session_id: str, prompt: str) -> dict[str, Any] | None:
-    try:
-        resp = requests.post(
-            f"{BACKEND_URL}/interpret",
-            json={"session_id": session_id, "prompt": prompt},
-            timeout=60,
-        )
-        resp.raise_for_status()
-        return resp.json()
-    except requests.HTTPError as exc:
-        detail = exc.response.json().get("detail", str(exc)) if exc.response is not None else str(exc)
-        st.error(f"Interpretation failed: {detail}")
-    except requests.RequestException as exc:
-        st.error(f"Could not reach backend: {exc}")
-    return None
-
-
-def _fetch_chart(output_id: str) -> bytes | None:
-    try:
-        resp = requests.get(f"{BACKEND_URL}/chart/{output_id}", timeout=30)
-        resp.raise_for_status()
-        return resp.content
-    except requests.RequestException:
+    data = _session_store.get(session_id)
+    if data is None:
+        st.error("Session expired — please re-upload your file.")
         return None
+    df, _ = data
+    if currency_cols:
+        df = convert_currency_cols(df, currency_cols)
+
+    viz_spec = VizSpec(
+        chart_type=        spec["chart_type"],
+        x_axis=            spec["x_axis"],
+        y_axis=            spec["y_axis"],
+        aggregation=       spec["aggregation"],
+        agg_axis=          spec.get("agg_axis", "y"),
+        title=             spec.get("title", ""),
+        interpreted_intent=spec.get("interpreted_intent", ""),
+        filters=           spec.get("filters") or {},
+        grouping=          spec.get("grouping"),
+        color_encoding=    spec.get("color_encoding"),
+    )
+    try:
+        chart_result = render_chart(df, viz_spec, backend="matplotlib")
+        insight      = generate_insight(viz_spec, chart_result.stats)
+    except Exception as exc:
+        st.error(f"Chart rendering failed: {exc}")
+        return None
+
+    with open(chart_result.output_path, "rb") as fh:
+        chart_bytes = fh.read()
+
+    output_id = str(uuid.uuid4())
+    return {
+        "output_id":        output_id,
+        "chart_bytes":      chart_bytes,
+        "chart_path":       chart_result.output_path,
+        "insight":          insight,
+        "viz_spec":         viz_spec.to_dict(),
+        "alignment_issues": viz_spec.alignment_issues,
+    }
 
 
 def _submit_feedback(output_id: str, rating: int, comments: str, revision: bool) -> bool:
+    # DB persistence is optional; silently succeed when not configured
     try:
-        resp = requests.post(
-            f"{BACKEND_URL}/feedback",
-            json={
-                "output_id": output_id,
-                "rating": rating,
-                "comments": comments or None,
-                "revision_requested": revision,
-            },
-            timeout=15,
+        db_gen = get_db()
+        db = next(db_gen)
+        if db is None:
+            return True
+        from backend.models import Feedback, GeneratedOutput, User
+        system_user = db.query(User).filter(
+            User.email == "system@ai-viz-builder.internal"
+        ).first()
+        if system_user is None:
+            return True
+        fb = Feedback(
+            output_id=uuid.UUID(output_id),
+            user_id=system_user.user_id,
+            rating=rating,
+            comments=comments or None,
+            revision_requested=revision,
         )
-        resp.raise_for_status()
-        return True
-    except requests.RequestException as exc:
-        st.error(f"Feedback submission failed: {exc}")
-        return False
+        db.add(fb)
+        db.commit()
+    except Exception:
+        pass
+    return True
 
 
-def _export_url(output_id: str, fmt: str) -> str:
-    return f"{BACKEND_URL}/export/{output_id}?format={fmt}"
+def _get_pdf_bytes(png_bytes: bytes) -> bytes:
+    buf = io.BytesIO(png_bytes)
+    img = mpimg.imread(buf, format="png")
+    fig, ax = plt.subplots(figsize=(10, 7))
+    ax.imshow(img)
+    ax.axis("off")
+    out = io.BytesIO()
+    fig.savefig(out, format="pdf", bbox_inches="tight")
+    plt.close(fig)
+    out.seek(0)
+    return out.read()
 
 
 def _apply_chart_result(result: dict[str, Any]) -> None:
     """Write a render response into session state and trigger rerun."""
-    st.session_state.output_id = result["output_id"]
-    st.session_state.chart_bytes = _fetch_chart(result["output_id"])
-    st.session_state.insight = result["insight"]
-    st.session_state.viz_spec = result["viz_spec"]
-    st.session_state.alignment_issues = result.get("alignment_issues", [])
+    st.session_state.output_id   = result["output_id"]
+    st.session_state.chart_bytes = result["chart_bytes"]
+    st.session_state.chart_path  = result.get("chart_path", "")
+    st.session_state.insight     = result["insight"]
+    st.session_state.viz_spec    = result["viz_spec"]
+    st.session_state.alignment_issues  = result.get("alignment_issues", [])
     st.session_state.feedback_submitted = False
     st.rerun()
 
@@ -675,28 +678,21 @@ if st.session_state.session_id:
         exp_col1, exp_col2 = st.columns(2)
 
         with exp_col1:
-            png_resp = requests.get(
-                _export_url(st.session_state.output_id, "png"), timeout=15
+            st.download_button(
+                label="⬇️ Download PNG",
+                data=st.session_state.chart_bytes,
+                file_name=f"chart_{st.session_state.output_id[:8]}.png",
+                mime="image/png",
             )
-            if png_resp.ok:
-                st.download_button(
-                    label="⬇️ Download PNG",
-                    data=png_resp.content,
-                    file_name=f"chart_{st.session_state.output_id[:8]}.png",
-                    mime="image/png",
-                )
 
         with exp_col2:
-            pdf_resp = requests.get(
-                _export_url(st.session_state.output_id, "pdf"), timeout=30
+            pdf_bytes = _get_pdf_bytes(st.session_state.chart_bytes)
+            st.download_button(
+                label="⬇️ Download PDF",
+                data=pdf_bytes,
+                file_name=f"chart_{st.session_state.output_id[:8]}.pdf",
+                mime="application/pdf",
             )
-            if pdf_resp.ok:
-                st.download_button(
-                    label="⬇️ Download PDF",
-                    data=pdf_resp.content,
-                    file_name=f"chart_{st.session_state.output_id[:8]}.pdf",
-                    mime="application/pdf",
-                )
 
         # ── Feedback ───────────────────────────────────────────────────────────
 

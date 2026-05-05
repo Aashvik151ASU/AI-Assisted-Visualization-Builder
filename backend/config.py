@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     # Supabase
     supabase_url: str = ""
     supabase_anon_key: str = ""
-    database_url: str
+    database_url: str = ""   # optional; DB persistence is skipped when empty
 
     # File storage — raw uploads are NEVER written to disk (in-memory only)
     output_dir: str = "data/outputs"    # charts/exports only
