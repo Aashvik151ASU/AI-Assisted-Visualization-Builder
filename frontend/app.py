@@ -202,12 +202,11 @@ def _render_confirmed(
 
 
 def _submit_feedback(output_id: str, rating: int, comments: str, revision: bool) -> bool:
-    # Silently succeed when DATABASE_URL is not configured
+    db_gen = get_db()
+    db = next(db_gen)
+    if db is None:
+        return True   # DATABASE_URL not configured — skip silently
     try:
-        db_gen = get_db()
-        db = next(db_gen)
-        if db is None:
-            return True
         from backend.models import Feedback
         viz_spec: dict = st.session_state.get("viz_spec") or {}
         fb = Feedback(
@@ -221,8 +220,12 @@ def _submit_feedback(output_id: str, rating: int, comments: str, revision: bool)
         )
         db.add(fb)
         db.commit()
-    except Exception:
-        pass
+    except Exception as exc:
+        db.rollback()
+        st.warning(f"Feedback could not be saved: {exc}")
+        return False
+    finally:
+        db.close()
     return True
 
 
