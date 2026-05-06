@@ -220,100 +220,29 @@ All checks run on **NFKC-normalized** text to defeat homoglyph and full-width Un
 
 ### API boundary
 
-`POST /prompt`, `POST /interpret`, and `POST /render` all call `validate_input()` before any database writes. Violations return **HTTP 422** with a user-safe message.
+`POST /prompt`, `POST /interpret`, and `POST /render` all call `validate_input()` before processing. Violations return **HTTP 422** with a user-safe message.
 
 ---
 
 ## Data Model
 
-### Entities
+Supabase (PostgreSQL) is used exclusively to persist user feedback. All other data — uploaded DataFrames, schema profiles, chart specs, and insights — lives in RAM for the duration of the session and is never written to the database.
 
-#### User
-| Field | Type |
-|---|---|
-| `user_id` | UUID (PK) |
-| `name` | string |
-| `email` | string |
-| `role` | string |
+### Feedback table (`feedbacks`)
 
-#### Dataset
-| Field | Type |
-|---|---|
-| `dataset_id` | UUID (PK) |
-| `user_id` | UUID (FK) |
-| `file_name` | string |
-| `source_type` | string |
-| `upload_timestamp` | datetime |
-| `row_count` | int |
-| `column_count` | int |
-| `schema_version` | int |
+| Field | Type | Notes |
+|---|---|---|
+| `feedback_id` | UUID (PK) | Auto-generated |
+| `output_id` | UUID | Local chart identifier — no FK |
+| `session_id` | string | Session that produced the chart |
+| `rating` | integer (1–5) | Star rating submitted by the user |
+| `comments` | string | Optional free-text comment |
+| `revision_requested` | boolean | Whether the user asked for a revision |
+| `chart_type` | string | bar / line / scatter / pie / histogram |
+| `chart_title` | string | Title of the rated chart |
+| `submitted_at` | timestamptz | Auto-set on insert |
 
-#### DataColumnMetadata
-| Field | Type |
-|---|---|
-| `column_id` | UUID (PK) |
-| `dataset_id` | UUID (FK) |
-| `column_name` | string |
-| `detected_data_type` | string |
-| `null_percentage` | float |
-| `unique_count` | int |
-| `min_value` / `max_value` | string |
-| `sample_values` | JSONB |
-
-#### PromptRequest
-| Field | Type |
-|---|---|
-| `request_id` | UUID (PK) |
-| `user_id` | UUID (FK) |
-| `dataset_id` | UUID (FK) |
-| `prompt_text` | string |
-| `request_timestamp` | datetime |
-| `interpreted_intent` | string |
-| `status` | string |
-
-#### VisualizationSpec
-| Field | Type |
-|---|---|
-| `viz_id` | UUID (PK) |
-| `request_id` | UUID (FK) |
-| `chart_type` | string |
-| `x_axis` | string |
-| `y_axis` | string |
-| `aggregation` | string |
-| `filters` | JSONB |
-| `grouping` | string |
-| `title` | string |
-| `color_encoding` | string |
-
-#### GeneratedOutput
-| Field | Type |
-|---|---|
-| `output_id` | UUID (PK) |
-| `viz_id` | UUID (FK) |
-| `output_path` | string |
-| `output_format` | string |
-| `generated_timestamp` | datetime |
-| `insight_summary` | string |
-
-#### Feedback
-| Field | Type |
-|---|---|
-| `feedback_id` | UUID (PK) |
-| `output_id` | UUID (FK) |
-| `user_id` | UUID (FK) |
-| `rating` | int (1–5) |
-| `comments` | string |
-| `revision_requested` | bool |
-
-### Entity Relationship
-
-```text
-User ──< Dataset ──< DataColumnMetadata
-           │
-           └──< PromptRequest ──< VisualizationSpec ──< GeneratedOutput ──< Feedback
-```
-
-> The database is **optional**. When `DATABASE_URL` is not set, all DB operations are silent no-ops. Session data (raw DataFrames) lives in RAM only and is never persisted.
+> `DATABASE_URL` is optional. When unset, feedback submission is a silent no-op and the app works fully without a database.
 
 ---
 
