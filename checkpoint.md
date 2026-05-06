@@ -500,3 +500,51 @@ Supabase is now used exclusively to collect star-rating feedback from users. All
 - `backend/main.py` — stripped DB writes from all non-feedback endpoints; simplified `/feedback`; removed `/chart` and `/export`
 - `frontend/app.py` — fixed `_submit_feedback` to write chart context; removed `User` dependency
 - `backend/config.py` — removed `supabase_url`, `supabase_anon_key`
+
+---
+
+## Checkpoint 19 — Feedback Write Fix & Supabase Table Migration
+**Status:** Complete
+
+### Problem
+After Checkpoint 18, user feedback was still not appearing in Supabase for two reasons:
+
+1. **Old table schema still in Supabase.** The original `feedbacks` table had `output_id → generated_outputs` and `user_id → users` as NOT NULL foreign keys. SQLAlchemy's `create_all` only creates missing tables — it does not alter existing ones. The new `_submit_feedback` write omitted both FK columns, causing a constraint violation that was silently swallowed.
+
+2. **`_submit_feedback` swallowed all exceptions with bare `except Exception: pass`.** Any DB error (FK violation, connection failure, schema mismatch) was caught and discarded, making the failure completely invisible.
+
+### Fix 1: surface errors in `_submit_feedback` (`frontend/app.py`)
+
+Rewrote the exception handling:
+- Removed the bare `except Exception: pass` wrapper
+- Added `db.rollback()` on failure to keep the session clean
+- Added `db.close()` in a `finally` block to prevent session leaks
+- Surfaces the error to the user via `st.warning(f"Feedback could not be saved: {exc}")` so failures are visible
+
+### Fix 2: Supabase table migration (manual SQL)
+
+The `feedbacks` table in Supabase had to be recreated with the new standalone schema. Run in the Supabase SQL editor:
+
+```sql
+DROP TABLE IF EXISTS feedbacks CASCADE;
+
+CREATE TABLE feedbacks (
+    feedback_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    output_id          UUID NOT NULL,
+    session_id         TEXT,
+    rating             INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+    comments           TEXT,
+    revision_requested BOOLEAN DEFAULT FALSE,
+    chart_type         TEXT,
+    chart_title        TEXT,
+    submitted_at       TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+### Fix 3: README data model updated
+
+Replaced the 7-entity data model in `README.md` with the single `Feedback` table. Removed all FK-dependent entities that are no longer persisted.
+
+### File changes
+- `frontend/app.py` — `_submit_feedback` error handling rewritten; session properly closed in `finally`
+- `README.md` — data model section replaced with single Feedback table
