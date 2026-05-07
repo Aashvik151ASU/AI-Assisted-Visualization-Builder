@@ -548,3 +548,41 @@ Replaced the 7-entity data model in `README.md` with the single `Feedback` table
 ### File changes
 - `frontend/app.py` — `_submit_feedback` error handling rewritten; session properly closed in `finally`
 - `README.md` — data model section replaced with single Feedback table
+
+---
+
+## Checkpoint 20 — Column Description Helper for AI Suggestions
+**Status:** Complete
+
+### Feature
+After the AI Suggestions tab renders its suggestion cards, users can now provide plain-English descriptions for each dataset column so that Claude can generate more relevant chart suggestions on a second pass.
+
+### Problem
+The AI generates chart suggestions from schema metadata and sample values alone. For datasets with ambiguous or terse column names (e.g. `amt`, `cd`, `flg`), Claude may propose charts that are technically valid but semantically off — for example, treating a numeric code as a measure rather than a category. Users had no way to guide the AI without modifying the dataset itself.
+
+### Fix: column description expander (`frontend/app.py`)
+
+A **"Not happy with these suggestions? Describe your columns to help the AI"** expander appears below the suggestion cards whenever suggestions are loaded. Inside:
+
+- Each column in the uploaded dataset gets a labelled text input pre-filled with any previously saved description.
+- Inputs are laid out in two columns for readability.
+- A **"Regenerate Suggestions with My Descriptions"** primary button saves the filled descriptions and calls `_call_suggest` again, injecting the descriptions into the schema context string before the Claude API call.
+- On success the new suggestions replace the previous ones in session state and the page reruns.
+- Descriptions persist in `st.session_state.column_descriptions` across regenerations and are cleared when a new file is uploaded.
+
+### Schema context augmentation (`frontend/app.py` — `_call_suggest`)
+
+`_call_suggest` was updated to accept an optional `column_descriptions: dict[str, str]` parameter. When non-empty descriptions are provided, they are appended to the schema context string in the following format before being sent to Claude:
+
+```
+Column descriptions provided by the user:
+  - column_name: user description
+  - ...
+```
+
+### Session state
+- `"column_descriptions": {}` added to `_init_state()` defaults.
+- Reset to `{}` on every new file upload alongside other suggestion state.
+
+### File changes
+- `frontend/app.py` — added column description expander UI after suggestion cards; updated `_call_suggest` to accept and inject `column_descriptions`; added `column_descriptions` to session state defaults and upload reset

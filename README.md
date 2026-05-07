@@ -50,7 +50,7 @@ Deployed on Streamlit Community Cloud. Set `ANTHROPIC_API_KEY` in the app's Secr
 
 ### Two visualization paths
 
-**AI Suggestions tab** — click once to receive up to 5 AI-generated chart ideas tailored to the uploaded dataset's schema. Each suggestion renders immediately against the full dataset.
+**AI Suggestions tab** — click once to receive up to 5 AI-generated chart ideas tailored to the uploaded dataset's schema. Each suggestion renders immediately against the full dataset. If the suggestions miss the mark, expand the **"Describe your columns"** helper to add plain-English descriptions for any column and regenerate — Claude will use the descriptions to produce more relevant charts.
 
 **Build Your Own tab** — full manual control over every parameter:
 - Chart type (bar, line, scatter, pie, histogram)

@@ -74,6 +74,7 @@ def _init_state() -> None:
         "ai_suggestions": [],
         "ai_suggestions_loaded": False,
         "currency_cols": [],
+        "column_descriptions": {},
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -127,24 +128,38 @@ def _upload_file(file_obj) -> dict[str, Any] | None:
     }
 
 
-def _call_suggest(session_id: str) -> list[dict] | None:
+def _call_suggest(
+    session_id: str,
+    column_descriptions: dict[str, str] | None = None,
+) -> list[dict] | None:
     data = _session_store.get(session_id)
     if data is None:
         st.error("Session expired — please re-upload your file.")
         return None
     _, metadata = data
+    schema_context = metadata.get("schema_context", "")
+
+    # Append user-provided column descriptions to give Claude extra context
+    filled = {k: v.strip() for k, v in (column_descriptions or {}).items() if v and v.strip()}
+    if filled:
+        desc_lines = "\n".join(f"  - {col}: {desc}" for col, desc in filled.items())
+        schema_context = (
+            f"{schema_context}\n\n"
+            f"Column descriptions provided by the user:\n{desc_lines}"
+        )
+
     try:
-        pairs = suggest_with_specs(metadata.get("schema_context", ""))
+        pairs = suggest_with_specs(schema_context)
         return [
             {
-                "title":        spec.title,
-                "suggestion":   text,
-                "chart_type":   spec.chart_type,
-                "x_axis":       spec.x_axis,
-                "y_axis":       spec.y_axis,
-                "aggregation":  spec.aggregation,
-                "filters":      spec.filters or {},
-                "grouping":     spec.grouping,
+                "title":          spec.title,
+                "suggestion":     text,
+                "chart_type":     spec.chart_type,
+                "x_axis":         spec.x_axis,
+                "y_axis":         spec.y_axis,
+                "aggregation":    spec.aggregation,
+                "filters":        spec.filters or {},
+                "grouping":       spec.grouping,
                 "color_encoding": spec.color_encoding,
             }
             for spec, text in pairs
@@ -367,6 +382,7 @@ if uploaded is not None:
             st.session_state.feedback_submitted = False
             st.session_state.ai_suggestions = []
             st.session_state.ai_suggestions_loaded = False
+            st.session_state.column_descriptions = {}
             st.session_state.currency_cols = _detect_currency_cols(result["schema_profile"])
             st.success(
                 f"Uploaded **{result['file_name']}** — "
@@ -499,6 +515,47 @@ if st.session_state.session_id:
                             )
                         if result:
                             _apply_chart_result(result)
+
+            # ── Column description helper ──────────────────────────────────────
+            st.divider()
+            with st.expander("Not happy with these suggestions? Describe your columns to help the AI"):
+                st.caption(
+                    "Add a plain-English description for any column. "
+                    "The AI will use these descriptions to generate more relevant suggestions."
+                )
+                cols_in_schema = [
+                    c["column_name"]
+                    for c in (st.session_state.schema_profile or {}).get("columns", [])
+                ]
+                descriptions: dict[str, str] = {}
+                if cols_in_schema:
+                    input_cols = st.columns(2)
+                    for j, col_name in enumerate(cols_in_schema):
+                        existing = st.session_state.column_descriptions.get(col_name, "")
+                        with input_cols[j % 2]:
+                            descriptions[col_name] = st.text_input(
+                                col_name,
+                                value=existing,
+                                placeholder="e.g. Annual salary in USD before tax",
+                                key=f"col_desc_{col_name}",
+                            )
+                if st.button(
+                    "Regenerate Suggestions with My Descriptions",
+                    type="primary",
+                    key="btn_regen_suggestions",
+                ):
+                    st.session_state.column_descriptions = {
+                        k: v for k, v in descriptions.items() if v.strip()
+                    }
+                    with st.spinner("Regenerating suggestions with your column descriptions…"):
+                        new_suggestions = _call_suggest(
+                            st.session_state.session_id,
+                            st.session_state.column_descriptions,
+                        )
+                    if new_suggestions is not None:
+                        st.session_state.ai_suggestions = new_suggestions
+                        st.session_state.ai_suggestions_loaded = True
+                        st.rerun()
 
     # ── Tab 2 — Build Your Own ─────────────────────────────────────────────────
 
