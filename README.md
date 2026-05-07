@@ -8,6 +8,7 @@ A Python-first AI visualization builder that transforms uploaded structured busi
 
 - [Project Description](#project-description)
 - [Live Demo](#live-demo)
+- [How It Works — A Step-by-Step Walkthrough](#how-it-works--a-step-by-step-walkthrough)
 - [Features](#features)
 - [Architecture](#architecture)
 - [System Flow](#system-flow)
@@ -43,6 +44,72 @@ Each suggestion is a fully specified chart rendered instantly against the full d
 ## Live Demo
 
 Deployed on Streamlit Community Cloud. Set `ANTHROPIC_API_KEY` in the app's Secrets dashboard and point the main file to `frontend/app.py`.
+
+---
+
+## How It Works — A Step-by-Step Walkthrough
+
+No coding required. Here is exactly what you will see from the moment you open the app to the moment you download your finished chart.
+
+---
+
+### Step 1 — Upload Your Data File
+
+![Upload Dataset](Project_Screenshots/Upload_Dataset.png)
+
+Start by dragging your spreadsheet or data file onto the upload area, or click **Browse files** to pick it from your computer. The app accepts the most common data formats — CSV, Excel, JSON, and Parquet files up to 200 MB. Once the file lands, you will immediately see a green confirmation banner telling you how many rows and columns were found. In this example an NBA salary dataset with 15,857 rows and 5 columns was uploaded in under a second.
+
+---
+
+### Step 2 — Review Your Data Quality Report
+
+![Validation Report and Schema](Project_Screenshots/Validation_Report.png)
+
+The app automatically checks your data for common problems — missing values, duplicate rows, and columns that look like numbers but were stored as text (for example, salary amounts written as `$1,234`). You will see a **Validation Report** on the left showing how many rows and columns passed the check, plus any warnings worth knowing about. On the right, the **Schema Metadata** panel breaks down every column: what type of data it holds, how many unique values it has, and a few sample entries so you can confirm the app read your file correctly.
+
+Below the report, the app automatically spots any columns that hold dollar amounts or other currency values and offers to convert them to plain numbers before charting. Pre-selected columns are shown in a green pill — you can add or remove them with one click.
+
+---
+
+### Step 3A — Let the AI Suggest Charts
+
+![AI Suggestions and Column Descriptions](Project_Screenshots/A.I_Suggestions_And_Column_Description_By_User.png)
+
+Switch to the **AI Suggestions** tab and click **Get AI Suggestions**. Within a few seconds the AI reads your column names, data types, and sample values and proposes up to five ready-to-use charts — each one labelled with the chart type, which columns it uses, and a plain-English sentence explaining what the chart will show you. Click **Use This Chart** on any card to render it instantly against your full dataset.
+
+If the suggestions are not quite right for your use case, expand the **"Not happy with these suggestions?"** section at the bottom. Type a short description next to any column name — for example, *"Annual salary in USD before tax"* — then click **Regenerate Suggestions with My Descriptions**. The AI will use your descriptions to come up with more relevant ideas.
+
+---
+
+### Step 3B — Build Your Own Chart (Optional)
+
+![Build Your Own Options](Project_Screenshots/Build_Your_Own_Options.png)
+
+Prefer full control? Switch to the **Build Your Own** tab. Use the dropdowns to choose a chart type (bar, line, scatter, pie, or histogram), pick which column goes on each axis, choose how numbers should be summarised (total, average, count, etc.), and optionally split the chart into colour-coded groups. You can also narrow the data with up to three filters — for example, show only players from a specific season or team — before clicking **Generate Chart**.
+
+---
+
+### Step 4 — View Your Chart
+
+![Output Chart](Project_Screenshots/Output_Chart.png)
+
+Your chart appears instantly, rendered against every row of your uploaded dataset. It is sized automatically so labels never overlap and the chart is easy to read — wide datasets get a wider canvas, dense pie charts move their labels into a legend. This example shows a line chart of NBA player entries per season from 1990 to 2021, revealing a dramatic spike in 2021.
+
+---
+
+### Step 5 — Read the AI Insight and Export
+
+![Chart Insight and Export](Project_Screenshots/ChartInsight_And_ChartExport.png)
+
+Beneath every chart the AI writes a 2–3 sentence **Insight** summarising the most important pattern in plain English — no data expertise needed to understand it. When you are ready to share the chart, click **Download PNG** for an image file or **Download PDF** for a print-ready document.
+
+---
+
+### Step 6 — Rate the Chart
+
+![Feedback Form](Project_Screenshots/Feedback_Form.png)
+
+At the bottom of the page you can give the chart a star rating from 1 to 5, leave an optional comment, and tick **Request a revision** if you would like a different take. Your feedback is saved so the team can continue improving the AI suggestions over time.
 
 ---
 
